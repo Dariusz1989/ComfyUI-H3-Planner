@@ -85,6 +85,32 @@ def load_image(path):
     return torch.from_numpy(arr).unsqueeze(0)
 
 
+
+def cast_fingerprint(cast_json):
+    """The card text plus the size and mtime of every file a card names.
+
+    Keying the cache on the text alone kept a run that happened while a file was
+    missing (the image silently skipped) cached after the file arrived, so every
+    later render went out without that reference. A file appearing, changing or
+    disappearing now invalidates the cached result.
+    """
+    parts = [str(cast_json)]
+    try:
+        entries = json.loads(cast_json).get("entries", [])
+    except Exception:
+        return "".join(parts)
+    root = paths.cast_dir(create=False)
+    for entry in entries if isinstance(entries, list) else []:
+        filename = (entry or {}).get("file") or ""
+        if not filename:
+            continue
+        try:
+            st = os.stat(os.path.join(root, filename))
+            parts.append("|%s:%d:%d" % (filename, st.st_size, int(st.st_mtime)))
+        except OSError:
+            parts.append("|%s:missing" % filename)
+    return "".join(parts)
+
 def wired_values(grown):
     """An Autogrow bundle as a plain list, in slot order.
 
@@ -401,7 +427,7 @@ if comfy_io is not None:
         @classmethod
         def fingerprint_inputs(cls, cast_json, **kwargs):
             # Uploaded files can change under a stable card list.
-            return cast_json
+            return cast_fingerprint(cast_json)
 
         @classmethod
         def execute(cls, cast_json, ref_images=None, ref_audios=None,
@@ -458,7 +484,7 @@ else:
 
         @classmethod
         def IS_CHANGED(cls, cast_json, **kwargs):
-            return cast_json
+            return cast_fingerprint(cast_json)
 
         def build(self, cast_json, ref_images=None, ref_audios=None,
                   ref_videos=None, **wired):
